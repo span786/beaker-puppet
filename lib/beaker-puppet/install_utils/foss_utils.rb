@@ -1271,10 +1271,10 @@ module Beaker
             cmdline_args = ''
             # query packages
             case host[:platform]
-            when /ubuntu/
+            when /ubuntu|debian/
               pkgs = on(host, "dpkg-query -l  | awk '{print $2}' | grep -E '(^pe-|puppet)'",
                         acceptable_exit_codes: [0, 1]).stdout.chomp.split(/\n+/)
-            when /aix|sles|el|redhat|centos|oracle|scientific/
+            when /aix|amazon|sles|el|redhat|centos|oracle|scientific/
               pkgs = on(host, "rpm -qa  | grep -E '(^pe-|puppet)'",
                         acceptable_exit_codes: [0, 1]).stdout.chomp.split(/\n+/)
             when /solaris-10/
@@ -1284,13 +1284,33 @@ module Beaker
             when /solaris-11/
               pkgs = on(host, "pkg list | egrep '(^pe-|puppet)' | awk '{print $1}'",
                         acceptable_exit_codes: [0, 1]).stdout.chomp.split(/\n+/)
+            when /osx|darwin/
+              pkgs = on(host, "pkgutil --pkgs | grep -E '(^com.puppetlabs|puppet)'",
+                        acceptable_exit_codes: [0, 1]).stdout.chomp.split(/\n+/)
+            when /windows/
+              pkgs = on(host, "wmic product where \"name like '%Puppet%' or name like '%puppet%'\" get identifyingnumber",
+                        acceptable_exit_codes: [0, 1]).stdout.chomp.split(/\n+/).drop(1)
             else
               raise 'remove_puppet_on() called for unsupported ' +
                     "platform '#{host['platform']}' on '#{host.name}'"
             end
 
             # uninstall packages
-            host.uninstall_package(pkgs.join(' '), cmdline_args) if pkgs.length > 0
+            if pkgs.length > 0
+              case host[:platform]
+              when /osx|darwin/
+                pkgs.each do |pkg|
+                  on(host, "sudo pkgutil --forget #{pkg}", acceptable_exit_codes: [0, 1])
+                end
+              when /windows/
+                pkgs.each do |pkg|
+                  on(host "msiexec /x #{pkg}", acceptable_exit_codes: [0, 1])
+                  # on(host, "wmic product where \"name='#{pkg}'\" call uninstall /nointeractive", acceptable_exit_codes: [0, 1])
+                end
+              else
+                host.uninstall_package(pkgs.join(' '), cmdline_args)
+              end
+            end
 
             if host[:platform] =~ /solaris-11/
               # FIXME: This leaves things in a state where Puppet Enterprise (3.x) cannot be cleanly installed
